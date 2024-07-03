@@ -46,7 +46,14 @@ if __name__ == "__main__":
 
     seq_based = False  # TODO: change this based on the model
 
-    with DataPreparation(args.input_dir, output_dir=args.cache_dir) as dp:
+    output_file_name = f"{args.input_dir.name}_inference.h5"
+    sub_dir_name = args.input_dir.name
+    with DataPreparation(
+        args.input_dir,
+        output_dir=args.cache_dir,
+        output_file_name=output_file_name,
+        sub_dir_name=sub_dir_name,
+    ) as dp:
         if dp.need_preparation():
             dp.prepare()
         else:

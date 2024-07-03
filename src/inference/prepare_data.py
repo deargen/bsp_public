@@ -11,8 +11,8 @@ import numpy as np
 import tfbio_data
 from Bio.PDB import PDBParser
 from openbabel import pybel
-from utils.frames import to_frame
 from tqdm import tqdm
+from utils.frames import to_frame
 
 
 class DataPreparation:
@@ -20,6 +20,8 @@ class DataPreparation:
         self,
         input_dir: Path,
         output_dir: Path | None = None,
+        output_file_name: str | None = None,
+        sub_dir_name: str | None = None,
         gridSize=16,
         voxelSize=1.0,
         CA_within=17.0,
@@ -28,6 +30,8 @@ class DataPreparation:
         assert len(pdb_files) > 0, f"No pdb files found in {input_dir}"
         self.pdb_files = pdb_files
         self.provided_output_dir = output_dir
+        self.provided_output_file_name = output_file_name
+        self.sub_dir_name = sub_dir_name
 
         self.gridSize = gridSize
         self.voxelSize = voxelSize
@@ -43,8 +47,20 @@ class DataPreparation:
             self.tempdir = None
             self.output_dir = self.provided_output_dir
             self.output_dir.mkdir(exist_ok=True, parents=True)
+        output_file_name = (
+            "inference_cache.h5"
+            if self.provided_output_file_name is None
+            else self.provided_output_file_name
+        )
 
-        self.cache_file = self.output_dir / "inference_cache.h5"
+        self.cache_file = self.output_dir / output_file_name
+
+        self.sub_dir = (
+            self.output_dir
+            if self.sub_dir_name is None
+            else self.output_dir / self.sub_dir_name
+        )
+        self.sub_dir.mkdir(exist_ok=True, parents=True)
 
         return self
 
@@ -64,10 +80,10 @@ class DataPreparation:
             for pdb_file in tqdm(self.pdb_files):
                 try:
                     prot_name = pdb_file.stem
-                    copied_pdb_file = self.output_dir / pdb_file.name
+                    copied_pdb_file = self.sub_dir / pdb_file.name
                     shutil.copy(pdb_file, copied_pdb_file)
                     sp.call(["fpocket", "-f", str(copied_pdb_file)])
-                    fpocket_out_dir = self.output_dir / f"{copied_pdb_file.stem}_out"
+                    fpocket_out_dir = self.sub_dir / f"{copied_pdb_file.stem}_out"
                     if not fpocket_out_dir.exists():
                         raise FileNotFoundError(
                             f"Directory {fpocket_out_dir} does not exist"
@@ -141,7 +157,8 @@ class DataPreparation:
                                 unioned_potential_atom_idxs, potential_atom_idxs
                             )
                             CA_gp["sub_atom_idxs"] = sub_atom_idxs.astype(np.uint16)
-                except:
+                except Exception as e:
+                    raise e
                     errored = True
                     break
         if errored:
