@@ -149,11 +149,6 @@ if __name__ == "__main__":
                         code, {}
                     ).setdefault(pocket_idx, {})[ca_idx] = sigmoid(score)
 
-        print(code_to_pocket_idx_to_ca_idx_to_score)
-        print("-------------------------")
-        # print(code_to_pocket_idx_to_score)
-        # print(code_to_pocket_idx_to_ca_idx_to_residue_name)
-
     # write csv
     def _get_csv_lines():
         csv_lines = []
