@@ -3,7 +3,7 @@ FROM pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
 # Basic setup
 ENV APP_PATH=/workspace/bsp_public
 WORKDIR $APP_PATH
-COPY ./docker_requirements.txt . 
+COPY docker_requirements.txt . 
 
 # Install python dependencies
 RUN apt-get update

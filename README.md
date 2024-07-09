@@ -2,11 +2,10 @@
 
 ## Setup
 ```
-docker pull daeseoklee/bsp_public:dev
+docker pull daeseoklee/bsp-inference
 ```
 
 ## Run
 ```
-docker run -it -p 6030:5000 --rm --name bsp_public daeseoklee/bsp_public:dev
-bash scripts/example_inference.sh
+./predict-binding-site $input_dir $output_csv_file 
 ```

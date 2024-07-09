@@ -1,2 +1,2 @@
-FROM daeseoklee/bsp_public:dep1
+FROM daeseoklee/bsp-inference:dep1
 RUN conda install -y -c conda-forge openbabel
