@@ -17,6 +17,8 @@ if [ -z "$2" ]; then
 fi
 output_file=$2
 output_dir=$(dirname $output_file)
+mkdir -p $output_dir
+output_dir=$(readlink -f $output_dir)
 output_filename=$(basename $output_file)
 # Additional arguments
 additional_args=${@:3}
@@ -30,7 +32,7 @@ echo "Output file: $output_file"
 input_dir=$(readlink -f $input_dir)
 
 # Run 
-docker run --rm -v $output_dir:/output -v $input_dir:/input -w /output daeseoklee/bsp-inference -i /input -o /output/$output_filename $additional_args
+docker run --rm -v $output_dir:/output -v $input_dir:/input daeseoklee/bsp-inference -i /input -o /output/$output_filename $additional_args
 if [ -f $output_file ]; then
     echo "Output file $output_file is generated"
 else
