@@ -111,11 +111,17 @@ class PocketwiseDatasetForInference(Dataset):
         pocket_path = self.pocket_paths[i]
         _, code, pocket_key = pocket_path.split("/")
         pocket_idx = int(pocket_key[len("pocket") :])
+        pocket_gp = self.hdf[pocket_path]
+        pocket_center = pocket_gp["center"][:]
 
         if not self.seq_based:
-            return (code, pocket_idx), self.getitem_voxel_based(pocket_path)
+            return (code, pocket_idx, pocket_center), self.getitem_voxel_based(
+                pocket_path
+            )
         else:
-            return (code, pocket_idx), self.getitem_seq_based(pocket_path)
+            return (code, pocket_idx, pocket_center), self.getitem_seq_based(
+                pocket_path
+            )
 
     def getitem_voxel_based(self, pocket_path):
         prot_gp = self.hdf["/".join(pocket_path.split("/")[:-1])]
@@ -222,6 +228,7 @@ class PocketwiseDatasetForInference(Dataset):
     def collate_fn(self, data_list):
         code_list = [x[0][0] for x in data_list]
         pocket_idx_list = [x[0][1] for x in data_list]
+        pocket_center_list = [x[0][2] for x in data_list]
         data_list = [x[1] for x in data_list]
         if not self.seq_based:
             lens = [len(x[0]) for x in data_list]
@@ -236,6 +243,7 @@ class PocketwiseDatasetForInference(Dataset):
             return (
                 code_list,
                 pocket_idx_list,
+                pocket_center_list,
                 lens,
                 cat_grids,
                 R,
@@ -252,7 +260,16 @@ class PocketwiseDatasetForInference(Dataset):
 
             ca_idxs_list = [a[4] for a in data_list]
 
-            return code_list, pocket_idx_list, x, R, t, mask, ca_idxs_list
+            return (
+                code_list,
+                pocket_idx_list,
+                pocket_center_list,
+                x,
+                R,
+                t,
+                mask,
+                ca_idxs_list,
+            )
 
     def getitem_seq_based(self, pocket_path):
         if self.CA_within != 17:

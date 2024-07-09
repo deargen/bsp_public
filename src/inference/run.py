@@ -78,18 +78,29 @@ if __name__ == "__main__":
             num_workers=0,
         )
         code_to_pocket_idx_to_score = {}
+        code_to_pocket_idx_to_center = {}
         code_to_pocket_idx_to_ca_idx_to_score = {}
         print("Predicting..")
         code_to_pocket_idx_to_ca_idx_to_residue_name = {}
         for batch in tqdm(dataloader):
             # TODO: Output resnames as well
             if seq_based:
-                code_list, pocket_idx_list, x, R, t, mask, ca_idxs_list = batch
+                (
+                    code_list,
+                    pocket_idx_list,
+                    pocket_center_list,
+                    x,
+                    R,
+                    t,
+                    mask,
+                    ca_idxs_list,
+                ) = batch
                 raise NotImplementedError
             else:
                 (
                     code_list,
                     pocket_idx_list,
+                    pocket_center_list,
                     lens,
                     cat_grids,
                     R,
@@ -97,13 +108,17 @@ if __name__ == "__main__":
                     ca_idxs_list,
                     residue_names_list,
                 ) = batch
-                for code, pocket_idx, ca_idxs, residue_names in zip(
+                for code, pocket_idx, pocket_center, ca_idxs, residue_names in zip(
                     code_list,
                     pocket_idx_list,
+                    pocket_center_list,
                     ca_idxs_list,
                     residue_names_list,
                     strict=True,
                 ):
+                    code_to_pocket_idx_to_center.setdefault(code, {})[pocket_idx] = (
+                        pocket_center
+                    )
                     for ca_idx, residue_name in zip(
                         ca_idxs, residue_names, strict=True
                     ):
@@ -159,6 +174,7 @@ if __name__ == "__main__":
             selected_pocket_idxs = sorted_pocket_idxs[: args.top_n]
 
             for pocket_rank, pocket_idx in enumerate(selected_pocket_idxs, start=1):
+                pocket_center = code_to_pocket_idx_to_center[code][pocket_idx]
                 pocket_score = pocket_idx_to_score[pocket_idx]
 
                 ca_idx_to_score = code_to_pocket_idx_to_ca_idx_to_score[code][
@@ -197,10 +213,13 @@ if __name__ == "__main__":
                     csv_line = [
                         code,
                         pocket_idx,
-                        pocket_score,
+                        round(pocket_center[0], 2),
+                        round(pocket_center[1], 2),
+                        round(pocket_center[2], 2),
+                        round(pocket_score, 2),
                         pocket_rank,
                         residue_name,
-                        residue_score,
+                        round(residue_score, 2),
                         residue_rank,
                     ]
                     csv_lines.append(csv_line)
@@ -213,6 +232,9 @@ if __name__ == "__main__":
         columns=[
             "code",
             "pocket_idx",
+            "pocket_center_x",
+            "pocket_center_y",
+            "pocket_center_z",
             "pocket_score",
             "pocket_rank_within_code",
             "residue_name",
