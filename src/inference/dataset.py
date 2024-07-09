@@ -4,10 +4,11 @@ from pathlib import Path
 import h5py
 import numpy as np
 import torch
-from utils.random_rotations import get_random_rotation
 from tfbio_data import make_grid
 from torch.nn.functional import pad
 from torch.utils.data import Dataset
+from utils.random_rotations import get_random_rotation
+
 
 def padstack(l: list[torch.Tensor], pad_value=0) -> torch.Tensor:  # noqa: E741
     n = len(l[0].shape)
@@ -89,8 +90,8 @@ class PocketwiseDatasetForInference(Dataset):
             for code in hdf.keys():
                 f = hdf[code]
                 num_pockets = f.attrs["num_pockets"]
-                for pocket_idx in range(num_pockets):
-                    pocket_key = f"pocket_{pocket_idx}"
+                for pocket_idx in range(1, num_pockets + 1):
+                    pocket_key = f"pocket{pocket_idx}"
                     assert pocket_key in f
                     pocket_path = f"/{code}/{pocket_key}"
                     pocket_paths.append(pocket_path)
@@ -109,7 +110,7 @@ class PocketwiseDatasetForInference(Dataset):
 
         pocket_path = self.pocket_paths[i]
         _, code, pocket_key = pocket_path.split("/")
-        pocket_idx = int(pocket_key.split("_")[-1])
+        pocket_idx = int(pocket_key[len("pocket") :])
 
         if not self.seq_based:
             return (code, pocket_idx), self.getitem_voxel_based(pocket_path)
@@ -150,6 +151,7 @@ class PocketwiseDatasetForInference(Dataset):
         ts = []
         Rs = []
         ca_idxs = []
+        residue_names = []
 
         for i in potential_ca_idxs:
             residue_gp = pocket_gp[f"CA_{i}"]
@@ -157,6 +159,7 @@ class PocketwiseDatasetForInference(Dataset):
             # local frame
             t = residue_gp["coord"][:]  # in Angstroms
             R = residue_gp["orientation"][:]
+            residue_name = residue_gp.attrs["residue_name"]
             if self.frame_rotation is not None:
                 if not (
                     isinstance(self.frame_rotation, float)
@@ -206,6 +209,7 @@ class PocketwiseDatasetForInference(Dataset):
                 torch.from_numpy(t * 0.1)
             )  # Angstroms -> nanometers, as in Alphafold
             Rs.append(torch.from_numpy(R))
+            residue_names.append(residue_name)
 
             ca_idxs.append(i)
 
@@ -213,7 +217,7 @@ class PocketwiseDatasetForInference(Dataset):
         ts = torch.stack(ts, dim=0)
         Rs = torch.stack(Rs, dim=0)
 
-        return grids, Rs, ts, ca_idxs
+        return grids, Rs, ts, ca_idxs, residue_names
 
     def collate_fn(self, data_list):
         code_list = [x[0][0] for x in data_list]
@@ -227,8 +231,18 @@ class PocketwiseDatasetForInference(Dataset):
             t = padstack([x[2] for x in data_list])
 
             ca_idxs_list = [x[3] for x in data_list]
+            residue_names_list = [x[4] for x in data_list]
 
-            return code_list, pocket_idx_list, lens, cat_grids, R, t, ca_idxs_list
+            return (
+                code_list,
+                pocket_idx_list,
+                lens,
+                cat_grids,
+                R,
+                t,
+                ca_idxs_list,
+                residue_names_list,
+            )
         else:
             # xs, Rs, ts, mask, ca_idxs
             x = padstack([a[0] for a in data_list])

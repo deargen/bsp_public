@@ -1,7 +1,9 @@
 from argparse import ArgumentParser
+from math import exp
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from inference.dataset import PocketwiseDatasetForInference
 from inference.prepare_data import DataPreparation
@@ -14,10 +16,16 @@ def parse_args():
     parser = ArgumentParser()
     parser.add_argument("-i", "--input_dir", type=Path, required=True)
     parser.add_argument("-c", "--cache_dir", type=Path)
-    parser.add_argument("-o", "--output_dir", type=Path, required=True)
+    parser.add_argument("-o", "--output_file", type=Path, required=True)
     parser.add_argument("-d", "--device", type=str, default="cuda:0")
     parser.add_argument("-b", "--batch_size", type=int, default=8)
+    parser.add_argument("--top_n", type=int, default=5)
+    parser.add_argument("--residue_thres", type=float, default=0.5)
     return parser.parse_args()
+
+
+def sigmoid(x):
+    return 1 / (1 + exp(-x))
 
 
 if __name__ == "__main__":
@@ -72,12 +80,37 @@ if __name__ == "__main__":
         code_to_pocket_idx_to_score = {}
         code_to_pocket_idx_to_ca_idx_to_score = {}
         print("Predicting..")
+        code_to_pocket_idx_to_ca_idx_to_residue_name = {}
         for batch in tqdm(dataloader):
+            # TODO: Output resnames as well
             if seq_based:
                 code_list, pocket_idx_list, x, R, t, mask, ca_idxs_list = batch
                 raise NotImplementedError
             else:
-                code_list, pocket_idx_list, lens, cat_grids, R, t, ca_idxs_list = batch
+                (
+                    code_list,
+                    pocket_idx_list,
+                    lens,
+                    cat_grids,
+                    R,
+                    t,
+                    ca_idxs_list,
+                    residue_names_list,
+                ) = batch
+                for code, pocket_idx, ca_idxs, residue_names in zip(
+                    code_list,
+                    pocket_idx_list,
+                    ca_idxs_list,
+                    residue_names_list,
+                    strict=True,
+                ):
+                    for ca_idx, residue_name in zip(
+                        ca_idxs, residue_names, strict=True
+                    ):
+                        code_to_pocket_idx_to_ca_idx_to_residue_name.setdefault(
+                            code, {}
+                        ).setdefault(pocket_idx, {})[ca_idx] = residue_name
+
                 cat_grids = cat_grids.to(args.device)
                 R = R.to(args.device)
                 t = t.to(args.device)
@@ -105,17 +138,96 @@ if __name__ == "__main__":
             for code, pocket_idx, score in zip(
                 code_list, pocket_idx_list, bsd_out, strict=True
             ):
-                code_to_pocket_idx_to_score.setdefault(code, {})[pocket_idx] = score
+                code_to_pocket_idx_to_score.setdefault(code, {})[pocket_idx] = sigmoid(
+                    score
+                )
             for code, pocket_idx, bri_out, ca_idxs in zip(
                 code_list, pocket_idx_list, bri_out_list, ca_idxs_list, strict=True
             ):
                 for ca_idx, score in zip(ca_idxs, bri_out, strict=True):
                     code_to_pocket_idx_to_ca_idx_to_score.setdefault(
                         code, {}
-                    ).setdefault(pocket_idx, {})[ca_idx] = score
+                    ).setdefault(pocket_idx, {})[ca_idx] = sigmoid(score)
 
         print(code_to_pocket_idx_to_ca_idx_to_score)
         print("-------------------------")
-        print(code_to_pocket_idx_to_score)
+        # print(code_to_pocket_idx_to_score)
+        # print(code_to_pocket_idx_to_ca_idx_to_residue_name)
 
-        # TODO: interpret and save the results and remove the above print statements
+    # write csv
+    def _get_csv_lines():
+        csv_lines = []
+        for code, pocket_idx_to_score in code_to_pocket_idx_to_score.items():
+            sorted_pocket_idxs = sorted(
+                pocket_idx_to_score.keys(), key=lambda x: -pocket_idx_to_score[x]
+            )
+            selected_pocket_idxs = sorted_pocket_idxs[: args.top_n]
+
+            for pocket_rank, pocket_idx in enumerate(selected_pocket_idxs, start=1):
+                pocket_score = pocket_idx_to_score[pocket_idx]
+
+                ca_idx_to_score = code_to_pocket_idx_to_ca_idx_to_score[code][
+                    pocket_idx
+                ]
+                ca_idx_to_residue_name = code_to_pocket_idx_to_ca_idx_to_residue_name[
+                    code
+                ][pocket_idx]
+                residue_name_to_ca_idx = {
+                    v: k for k, v in ca_idx_to_residue_name.items()
+                }
+                sorted_residue_names = sorted(
+                    ca_idx_to_residue_name.values(),
+                    key=lambda residue_name: (
+                        int(residue_name.split("_")[1]),
+                        residue_name.split("_")[0],
+                    ),
+                )
+                selected_residue_names = [
+                    residue_name
+                    for residue_name in sorted_residue_names
+                    if ca_idx_to_score[residue_name_to_ca_idx[residue_name]]
+                    >= args.residue_thres
+                ]
+                score_sorted_residue_names = sorted(
+                    selected_residue_names,
+                    key=lambda residue_name: -ca_idx_to_score[
+                        residue_name_to_ca_idx[residue_name]
+                    ],
+                )
+
+                for residue_name in selected_residue_names:
+                    ca_idx = residue_name_to_ca_idx[residue_name]
+                    residue_score = ca_idx_to_score[ca_idx]
+                    residue_rank = score_sorted_residue_names.index(residue_name) + 1
+                    csv_line = [
+                        code,
+                        pocket_idx,
+                        pocket_score,
+                        pocket_rank,
+                        residue_name,
+                        residue_score,
+                        residue_rank,
+                    ]
+                    csv_lines.append(csv_line)
+        return csv_lines
+
+    csv_lines = _get_csv_lines()
+
+    df = pd.DataFrame(
+        csv_lines,
+        columns=[
+            "code",
+            "pocket_idx",
+            "pocket_score",
+            "pocket_rank_within_code",
+            "residue_name",
+            "residue_score",
+            "residue_rank_within_pocket",
+        ],
+    )
+    args.output_file.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(args.output_file, index=False)
+
+    """ 
+    code, pocket_idx, pocket_score, pocket_rank_within_code, residue_name, residue_score, residue_rank_within_pocket 
+    """

@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 import tfbio_data
 from Bio.PDB import PDBParser
+from Bio.PDB.Residue import Residue
 from openbabel import pybel
 from tqdm import tqdm
 from utils.frames import to_frame
@@ -112,14 +113,14 @@ class DataPreparation:
 
                     CA_info_list = get_CA_info_list(pdb_parser, pdb_file)
 
-                    for i, pocket_center in enumerate(pocket_centers):
-                        prot_gp.create_group(f"pocket_{i}")
-                        pocket_gp = prot_gp[f"pocket_{i}"]
+                    for i, pocket_center in enumerate(pocket_centers, start=1):
+                        prot_gp.create_group(f"pocket{i}")
+                        pocket_gp = prot_gp[f"pocket{i}"]
                         pocket_gp["center"] = pocket_center
 
                         num_cas = 0
                         potential_atom_idxs_list = []
-                        for t, R, heavy_coords in CA_info_list:
+                        for t, R, heavy_coords, residue_name in CA_info_list:
                             dist = np.linalg.norm(pocket_center - t)
                             if dist > self.CA_within:
                                 continue
@@ -128,6 +129,7 @@ class DataPreparation:
 
                             CA_gp["coord"] = t
                             CA_gp["orientation"] = R
+                            CA_gp.attrs["residue_name"] = residue_name
 
                             potential_atom_idxs = get_potential_atom_idxs(
                                 t,
@@ -219,9 +221,10 @@ def get_CA_info_list(pdb_parser: PDBParser, protein_file):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         model = pdb_parser.get_structure("", protein_file)[0]
-    t_list, R_list, heavy_coords_list = [], [], []
+    t_list, R_list, heavy_coords_list, residue_names = [], [], [], []
     for chain in model.child_list:
         for residue in chain:
+            residue: Residue
             if "CA" not in residue:
                 continue
             if "N" not in residue:
@@ -239,7 +242,10 @@ def get_CA_info_list(pdb_parser: PDBParser, protein_file):
             )
             heavy_coords_list.append(heavy_coords)
 
-    return list(zip(t_list, R_list, heavy_coords_list))
+            residue_name = f"{residue.resname}_{residue.id[1]}"
+            residue_names.append(residue_name)
+
+    return list(zip(t_list, R_list, heavy_coords_list, residue_names))
 
 
 def get_sub_idxs(arr: np.ndarray, subarr: np.ndarray):
