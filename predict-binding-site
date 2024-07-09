@@ -32,7 +32,9 @@ echo "Output file: $output_file"
 input_dir=$(readlink -f $input_dir)
 
 # Run 
-docker run --rm -v $output_dir:/output -v $input_dir:/input daeseoklee/bsp-inference -i /input -o /output/$output_filename $additional_args
+MOUNT_STR="-v $output_dir:/output -v $input_dir:/input"
+GPU_STR="--runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -e NVIDIA_VISIBLE_DEVICES=all"
+docker run --rm $MOUNT_STR $GPU_STR daeseoklee/bsp-inference -i /input -o /output/$output_filename $additional_args
 if [ -f $output_file ]; then
     echo "Output file $output_file is generated"
 else
