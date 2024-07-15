@@ -113,7 +113,7 @@ class DataPreparation:
 
                     CA_info_list = get_CA_info_list(pdb_parser, pdb_file)
 
-                    for i, pocket_center in enumerate(pocket_centers, start=1):
+                    for i, pocket_center in enumerate(pocket_centers, start=0):
                         prot_gp.create_group(f"pocket_{i}")
                         pocket_gp = prot_gp[f"pocket_{i}"]
                         pocket_gp["center"] = pocket_center
