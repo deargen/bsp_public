@@ -110,18 +110,18 @@ class PocketwiseDatasetForInference(Dataset):
 
         pocket_path = self.pocket_paths[i]
         _, code, pocket_key = pocket_path.split("/")
-        pocket_idx = (
+        pocket_num = (
             int(pocket_key[len("pocket_") :]) + 1
         )  # This corresponds to Fpocket pocket index
         pocket_gp = self.hdf[pocket_path]
         pocket_center = pocket_gp["center"][:]
 
         if not self.seq_based:
-            return (code, pocket_idx, pocket_center), self.getitem_voxel_based(
+            return (code, pocket_num, pocket_center), self.getitem_voxel_based(
                 pocket_path
             )
         else:
-            return (code, pocket_idx, pocket_center), self.getitem_seq_based(
+            return (code, pocket_num, pocket_center), self.getitem_seq_based(
                 pocket_path
             )
 
@@ -234,7 +234,7 @@ class PocketwiseDatasetForInference(Dataset):
 
     def collate_fn(self, data_list):
         code_list = [x[0][0] for x in data_list]
-        pocket_idx_list = [x[0][1] for x in data_list]
+        pocket_num_list = [x[0][1] for x in data_list]
         pocket_center_list = [x[0][2] for x in data_list]
         data_list = [x[1] for x in data_list]
         if not self.seq_based:
@@ -249,7 +249,7 @@ class PocketwiseDatasetForInference(Dataset):
 
             return (
                 code_list,
-                pocket_idx_list,
+                pocket_num_list,
                 pocket_center_list,
                 lens,
                 cat_grids,
@@ -269,7 +269,7 @@ class PocketwiseDatasetForInference(Dataset):
 
             return (
                 code_list,
-                pocket_idx_list,
+                pocket_num_list,
                 pocket_center_list,
                 x,
                 R,
