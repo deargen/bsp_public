@@ -90,8 +90,8 @@ class PocketwiseDatasetForInference(Dataset):
             for code in hdf.keys():
                 f = hdf[code]
                 num_pockets = f.attrs["num_pockets"]
-                for pocket_idx in range(1, num_pockets + 1):
-                    pocket_key = f"pocket{pocket_idx}"
+                for pocket_idx in range(num_pockets):
+                    pocket_key = f"pocket_{pocket_idx}"
                     assert pocket_key in f
                     pocket_path = f"/{code}/{pocket_key}"
                     pocket_paths.append(pocket_path)
@@ -110,7 +110,9 @@ class PocketwiseDatasetForInference(Dataset):
 
         pocket_path = self.pocket_paths[i]
         _, code, pocket_key = pocket_path.split("/")
-        pocket_idx = int(pocket_key[len("pocket") :])
+        pocket_idx = (
+            int(pocket_key[len("pocket_") :]) + 1
+        )  # This corresponds to Fpocket pocket index
         pocket_gp = self.hdf[pocket_path]
         pocket_center = pocket_gp["center"][:]
 
@@ -165,7 +167,12 @@ class PocketwiseDatasetForInference(Dataset):
             # local frame
             t = residue_gp["coord"][:]  # in Angstroms
             R = residue_gp["orientation"][:]
-            residue_name = residue_gp.attrs["residue_name"]
+            if "residue_name" in residue_gp.attrs:
+                residue_name = residue_gp.attrs["residue_name"]
+            else:
+                # TODO: Change this?
+                pocket_name = pocket_path.split("/")[-1]
+                residue_name = f"{pocket_name}-res_{i}"
             if self.frame_rotation is not None:
                 if not (
                     isinstance(self.frame_rotation, float)
