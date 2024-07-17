@@ -20,3 +20,9 @@ Optionally, one can perform inference for the datasets appearing in our paper (s
 ```
 ./predict-binding-site scPDB_cache_partitioned/scPDB_cache_1.hdf5 scPDB_out_1.csv 
 ```
+
+### Replicating the case study results 
+```
+rm ./casestudy/out.csv
+bash ./casestudy/inference.sh 
+```

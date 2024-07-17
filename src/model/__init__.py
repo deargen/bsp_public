@@ -15,17 +15,34 @@ def load_json(filename):
 
 
 def get_train_dataset_config(experiment, version, fold=None):
+    foldname = get_foldname(fold)
     dataset_config_file = (
-        f"./logs/{experiment}/{version}/scPDB_fold{fold}/dataset_config.json"
+        f"./logs/{experiment}/{version}/scPDB_{foldname}/dataset_config.json"
     )
     return load_json(dataset_config_file)["trn"]
 
 
+def get_all_scPDB_folds(experiment, version):
+    dir = Path(f"./logs/{experiment}/{version}")
+    folds = []
+    for f in dir.glob("scPDB_*"):
+        fold = f.stem[len("scPDB_") :]
+        folds.append(fold)
+    return folds
+
+
 def get_train_config(experiment, version, fold=None):
+    foldname = get_foldname(fold)
     train_config_file = (
-        f"./logs/{experiment}/{version}/scPDB_fold{fold}/train_config.json"
+        f"./logs/{experiment}/{version}/scPDB_{foldname}/train_config.json"
     )
     return load_json(train_config_file)
+
+
+def get_foldname(fold):
+    if isinstance(fold, int):
+        return f"fold{fold}"
+    return fold
 
 
 def get_model(
@@ -35,12 +52,14 @@ def get_model(
     Load model on device from the given checkpoint
     """
 
+    foldname = get_foldname(fold)
+
     def get_ckpt_file():
         if when == "last":
-            return f"./logs/{experiment}/{version}/scPDB_fold{fold}/last.ckpt"
+            return f"./logs/{experiment}/{version}/scPDB_{foldname}/last.ckpt"
         elif when == "best":
             ckpt_pattern = Path(
-                f"./logs/{experiment}/{version}/scPDB_fold{fold}/epoch=*.ckpt"
+                f"./logs/{experiment}/{version}/scPDB_{foldname}/epoch=*.ckpt"
             )
             globbed = list(ckpt_pattern.parent.glob(ckpt_pattern.name))
             if len(globbed) == 1:

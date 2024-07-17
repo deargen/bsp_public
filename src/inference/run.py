@@ -7,21 +7,27 @@ import pandas as pd
 import torch
 from inference.dataset import PocketwiseDatasetForInference
 from inference.prepare_data import DataPreparation
-from model import get_model
+from model import get_all_scPDB_folds, get_model
 from prepare_data import read_pocket_center_file
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
+def _int_or_inf(x):
+    if x == "inf":
+        return float("inf")
+    return int(x)
+
+
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument("-i", "--input_path", type=Path, required=True)
-    parser.add_argument("-pc", "--pocket_center_file", type=Path)
+    parser.add_argument("-pc", "--pocket_center_filename", type=str)
     parser.add_argument("-c", "--cache_dir", type=Path)
     parser.add_argument("-o", "--output_path", type=Path, required=True)
     parser.add_argument("-d", "--device", type=str, default="cuda:0")
     parser.add_argument("-b", "--batch_size", type=int, default=8)
-    parser.add_argument("--top_n", type=int, default=5)
+    parser.add_argument("--top_n", type=_int_or_inf, default=5)
     parser.add_argument("--residue_thres", type=float, default=0.5)
     parser.add_argument("-mv", "--model_version", type=str, default="main")
     return parser.parse_args()
@@ -47,19 +53,19 @@ if __name__ == "__main__":
         if not args.input_path.exists():
             raise FileNotFoundError(args.input_path)
 
-    folds = [1, 2, 3, 4, 5]
-
     print("Loading BSD models..")
     bsd_models = []
-    for fold in tqdm(folds):
+    bsd_folds = get_all_scPDB_folds(args.model_version, "bsd")
+    for fold in tqdm(bsd_folds):
         model = get_model(args.model_version, "bsd", "best", fold, device=args.device)
         model.eval()
         bsd_models.append(model)
 
     print("Loading BRI models..")
     bri_models = []
-    for fold in tqdm(folds):
-        model = get_model("main", "bri", "best", fold, device=args.device)
+    bri_folds = get_all_scPDB_folds(args.model_version, "bri")
+    for fold in tqdm(bri_folds):
+        model = get_model(args.model_version, "bri", "best", fold, device=args.device)
         model.eval()
         bri_models.append(model)
 
@@ -70,11 +76,17 @@ if __name__ == "__main__":
         h5_cache_file_name = f"{args.input_path.name}_inference.h5"
         h5_cache_dir = args.cache_dir
         h5_cache_sub_dir_name = args.input_path.name
+        pocket_center_file = (
+            None
+            if args.pocket_center_filename is None
+            else args.input_path / args.pocket_center_filename
+        )
     else:
-        if args.pocket_center_file is not None:
+        if args.pocket_center_filename is not None:
             raise ValueError(
                 "pocket_center_file should be None if inferencing from a precomputed cache"
             )
+        pocket_center_file = None
         pdb_input_path = None
         h5_cache_file_name = args.input_path.name
         h5_cache_dir = args.input_path.parent
@@ -85,7 +97,7 @@ if __name__ == "__main__":
         output_dir=h5_cache_dir,
         output_file_name=h5_cache_file_name,
         sub_dir_name=h5_cache_sub_dir_name,
-        pocket_center_file=args.pocket_center_file,
+        pocket_center_file=pocket_center_file,
     ) as dp:
         if dp.need_preparation():
             dp.prepare()
@@ -93,8 +105,8 @@ if __name__ == "__main__":
             pass
         assert dp.cache_file.exists()
 
-        if args.pocket_center_file is not None:
-            pocket_centers_dict = read_pocket_center_file(args.pocket_center_file)
+        if pocket_center_file is not None:
+            pocket_centers_dict = read_pocket_center_file(pocket_center_file)
         else:
             pocket_centerse_dict = dp.pocket_centers_dict
         manual_pocket_names = {
@@ -205,7 +217,8 @@ if __name__ == "__main__":
             sorted_pocket_names = sorted(
                 pocket_name_to_score.keys(), key=lambda x: -pocket_name_to_score[x]
             )
-            selected_pocket_names = sorted_pocket_names[: args.top_n]
+            num_select = min(args.top_n, len(sorted_pocket_names))
+            selected_pocket_names = sorted_pocket_names[:num_select]
 
             for pocket_rank, pocket_name in enumerate(selected_pocket_names, start=1):
                 pocket_center = code_to_pocket_name_to_center[code][pocket_name]
