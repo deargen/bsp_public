@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument("-b", "--batch_size", type=int, default=8)
     parser.add_argument("--top_n", type=int, default=5)
     parser.add_argument("--residue_thres", type=float, default=0.5)
+    parser.add_argument("-mv", "--model_version", type=str, default="main")
     return parser.parse_args()
 
 
@@ -30,6 +31,9 @@ def sigmoid(x):
 
 if __name__ == "__main__":
     args = parse_args()
+    train_log_dir = Path("logs") / args.model_version
+    if not train_log_dir.exists():
+        raise FileNotFoundError(train_log_dir)
 
     if args.input_path.is_dir():
         pdb_files = list(args.input_path.glob("*.pdb"))
@@ -46,7 +50,7 @@ if __name__ == "__main__":
     print("Loading BSD models..")
     bsd_models = []
     for fold in tqdm(folds):
-        model = get_model("main", "bsd", "best", fold, device=args.device)
+        model = get_model(args.model_version, "bsd", "best", fold, device=args.device)
         model.eval()
         bsd_models.append(model)
 
