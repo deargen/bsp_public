@@ -52,6 +52,7 @@ class PocketwiseDatasetForInference(Dataset):
     def __init__(
         self,
         cache_file: str | Path,
+        manual_pocket_names: dict[str, list[str]] | None = None,
         mode="test",
         CA_within=17.0,
         grid_rotation=None,
@@ -82,6 +83,7 @@ class PocketwiseDatasetForInference(Dataset):
             assert 0 < rdo < 1
         self.rdo = rdo
 
+        self.manual_pocket_names = manual_pocket_names
         self.pocket_paths = self.get_pocket_paths()
 
     def get_pocket_paths(self):
@@ -90,11 +92,28 @@ class PocketwiseDatasetForInference(Dataset):
             for code in hdf.keys():
                 f = hdf[code]
                 num_pockets = f.attrs["num_pockets"]
-                for pocket_idx in range(num_pockets):
-                    pocket_key = f"pocket_{pocket_idx}"
-                    assert pocket_key in f
-                    pocket_path = f"/{code}/{pocket_key}"
-                    pocket_paths.append(pocket_path)
+                manual_pocket_centers = f.attrs.get("manual_pocket_centers", False)
+                if manual_pocket_centers:
+                    if self.manual_pocket_names is None:
+                        raise ValueError(
+                            "manual_pocket_centers is True, but manual_pocket_names is None"
+                        )
+                    if code not in self.manual_pocket_names:
+                        raise ValueError(
+                            f"manual_pocket_centers is True, but {code} not in manual_pocket_names {self.manual_pocket_names}"
+                        )
+                    for pocket_name in self.manual_pocket_names[code]:
+                        pocket_path = f"/{code}/{pocket_name}"
+                        pocket_paths.append(pocket_path)
+                else:
+                    pocket_num_starts_from = f.attrs.get("pocket_num_starts_from", 0)
+                    for pocket_num in range(
+                        pocket_num_starts_from, pocket_num_starts_from + num_pockets
+                    ):
+                        pocket_name = f"pocket_{pocket_num}"
+                        assert pocket_name in f
+                        pocket_path = f"/{code}/{pocket_name}"
+                        pocket_paths.append(pocket_path)
         return pocket_paths
 
     def __len__(self):
@@ -109,24 +128,22 @@ class PocketwiseDatasetForInference(Dataset):
             self.hdf = h5py.File(self.cache_file, "r")
 
         pocket_path = self.pocket_paths[i]
-        _, code, pocket_key = pocket_path.split("/")
-        pocket_num = (
-            int(pocket_key[len("pocket_") :]) + 1
-        )  # This corresponds to Fpocket pocket index
+        _, code, *pocket_name_pieces = pocket_path.split("/")
+        pocket_name = "/".join(pocket_name_pieces)
         pocket_gp = self.hdf[pocket_path]
         pocket_center = pocket_gp["center"][:]
 
         if not self.seq_based:
-            return (code, pocket_num, pocket_center), self.getitem_voxel_based(
+            return (code, pocket_name, pocket_center), self.getitem_voxel_based(
                 pocket_path
             )
         else:
-            return (code, pocket_num, pocket_center), self.getitem_seq_based(
+            return (code, pocket_name, pocket_center), self.getitem_seq_based(
                 pocket_path
             )
 
     def getitem_voxel_based(self, pocket_path):
-        prot_gp = self.hdf["/".join(pocket_path.split("/")[:-1])]
+        prot_gp = self.hdf["/".join(pocket_path.split("/")[:2])]
         pocket_gp = self.hdf[pocket_path]
         center = pocket_gp["center"][:]
 
@@ -234,7 +251,7 @@ class PocketwiseDatasetForInference(Dataset):
 
     def collate_fn(self, data_list):
         code_list = [x[0][0] for x in data_list]
-        pocket_num_list = [x[0][1] for x in data_list]
+        pocket_name_list = [x[0][1] for x in data_list]
         pocket_center_list = [x[0][2] for x in data_list]
         data_list = [x[1] for x in data_list]
         if not self.seq_based:
@@ -249,7 +266,7 @@ class PocketwiseDatasetForInference(Dataset):
 
             return (
                 code_list,
-                pocket_num_list,
+                pocket_name_list,
                 pocket_center_list,
                 lens,
                 cat_grids,
@@ -269,7 +286,7 @@ class PocketwiseDatasetForInference(Dataset):
 
             return (
                 code_list,
-                pocket_num_list,
+                pocket_name_list,
                 pocket_center_list,
                 x,
                 R,

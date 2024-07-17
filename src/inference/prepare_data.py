@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 import subprocess as sp
@@ -26,9 +27,14 @@ class DataPreparation:
         gridSize=16,
         voxelSize=1.0,
         CA_within=17.0,
+        pocket_center_file: Path | None = None,
     ):
         if input_dir is None:
             self.pdb_files = None
+            if pocket_center_file is not None:
+                raise ValueError(
+                    "pocket_center_file should be None if inferencing from a precomputed cache"
+                )
         else:
             pdb_files = list(input_dir.glob("*.pdb"))
             assert len(pdb_files) > 0, f"No pdb files found in {input_dir}"
@@ -38,6 +44,8 @@ class DataPreparation:
         self.sub_dir_name = sub_dir_name
 
         self.cache_file: Path | None = None
+        self.pocket_center_file = pocket_center_file
+        self.pocket_centers_dict: dict[str, dict[str, float]] = {}
 
         self.gridSize = gridSize
         self.voxelSize = voxelSize
@@ -82,6 +90,12 @@ class DataPreparation:
         if self.cache_file.exists():
             raise FileExistsError(f"File {self.cache_file} already exists")
 
+        if self.pocket_center_file is not None:
+            self.pocket_centers_dict = read_pocket_center_file(self.pocket_center_file)
+            manual_pocket_centers = True
+        else:
+            manual_pocket_centers = False
+
         with h5py.File(self.cache_file, "w") as f:
             errored = False
             for pdb_file in tqdm(self.pdb_files):
@@ -89,13 +103,21 @@ class DataPreparation:
                     prot_name = pdb_file.stem
                     copied_pdb_file = self.sub_dir / pdb_file.name
                     shutil.copy(pdb_file, copied_pdb_file)
-                    sp.call(["fpocket", "-f", str(copied_pdb_file)])
-                    fpocket_out_dir = self.sub_dir / f"{copied_pdb_file.stem}_out"
-                    if not fpocket_out_dir.exists():
-                        raise FileNotFoundError(
-                            f"Directory {fpocket_out_dir} does not exist"
-                        )
-                    pocket_centers = get_pocket_centers(fpocket_out_dir)
+                    if self.pocket_center_file is None:
+                        sp.call(["fpocket", "-f", str(copied_pdb_file)])
+                        fpocket_out_dir = self.sub_dir / f"{copied_pdb_file.stem}_out"
+                        if not fpocket_out_dir.exists():
+                            raise FileNotFoundError(
+                                f"Directory {fpocket_out_dir} does not exist"
+                            )
+                        pocket_centers = read_fpocket_outputs(fpocket_out_dir)
+                        self.pocket_centers_dict[prot_name] = pocket_centers
+                    else:
+                        if prot_name not in self.pocket_centers_dict:
+                            raise ValueError(
+                                f"Protein {prot_name} not found in pocket_center_file. pocket_center_dict: {self.pocket_centers_dict}"
+                            )
+                        pocket_centers = self.pocket_centers_dict[prot_name]
 
                     featurizer = tfbio_data.Featurizer(save_molecule_codes=False)
                     pdb_parser = PDBParser(PERMISSIVE=True, QUIET=True)
@@ -104,7 +126,7 @@ class DataPreparation:
                     prot_gp = f[prot_name]
 
                     mols = list(pybel.readfile("pdb", str(copied_pdb_file)))
-                    assert len(mols) == 1
+                    assert len(mols) >= 1, len(mols)
                     mol = mols[0]
                     mol.removeh()
 
@@ -116,12 +138,14 @@ class DataPreparation:
                     prot_gp["atom_features"] = atom_features.astype(np.float16)
 
                     prot_gp.attrs["num_pockets"] = len(pocket_centers)
+                    prot_gp.attrs["manual_pocket_centers"] = manual_pocket_centers
+                    prot_gp.attrs["pocket_num_starts_from"] = 1
 
                     CA_info_list = get_CA_info_list(pdb_parser, pdb_file)
 
-                    for i, pocket_center in enumerate(pocket_centers, start=0):
-                        prot_gp.create_group(f"pocket_{i}")
-                        pocket_gp = prot_gp[f"pocket_{i}"]
+                    for pocket_name, pocket_center in pocket_centers.items():
+                        prot_gp.create_group(pocket_name)
+                        pocket_gp = prot_gp[pocket_name]
                         pocket_gp["center"] = pocket_center
 
                         num_cas = 0
@@ -184,14 +208,31 @@ def get_potential_atom_idxs(
     return np.where(dists <= max_dist)[0]
 
 
-def get_pocket_centers(fpocket_output_dir: Path):
+def read_fpocket_outputs(fpocket_output_dir: Path):
     fpocket_pocket_dir = fpocket_output_dir / "pockets"
     pocket_pqr_files = list(fpocket_pocket_dir.glob("pocket*_vert.pqr"))
     pocket_pqr_files.sort(
         key=lambda file: int(next(re.finditer("\d+", file.name)).group())
     )
-    pocket_centers = np.array([get_center(file) for file in pocket_pqr_files])
+    pocket_pqr_files = {
+        int(next(re.finditer("\d+", file.name)).group()): file
+        for file in pocket_pqr_files
+    }
+    pocket_centers = {
+        f"pocket_{i}": get_center(file) for i, file in pocket_pqr_files.items()
+    }
     return pocket_centers
+
+
+def read_pocket_center_file(pocket_center_file: Path) -> dict[str, dict[str, float]]:
+    if pocket_center_file.suffix != ".json":
+        raise ValueError("pocket_center_file should be a json file")
+    with open(pocket_center_file, "r") as f:
+        pocket_centers_dict = json.load(f)
+    for prot_name, pocket_centers in pocket_centers_dict.items():
+        for pocket_name, center in pocket_centers.items():
+            pocket_centers_dict[prot_name][pocket_name] = np.array(center)
+    return pocket_centers_dict
 
 
 def get_center(pqr_file):

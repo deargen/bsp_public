@@ -8,6 +8,7 @@ import torch
 from inference.dataset import PocketwiseDatasetForInference
 from inference.prepare_data import DataPreparation
 from model import get_model
+from prepare_data import read_pocket_center_file
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -15,6 +16,7 @@ from tqdm import tqdm
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument("-i", "--input_path", type=Path, required=True)
+    parser.add_argument("-pc", "--pocket_center_file", type=Path)
     parser.add_argument("-c", "--cache_dir", type=Path)
     parser.add_argument("-o", "--output_path", type=Path, required=True)
     parser.add_argument("-d", "--device", type=str, default="cuda:0")
@@ -69,6 +71,10 @@ if __name__ == "__main__":
         h5_cache_dir = args.cache_dir
         h5_cache_sub_dir_name = args.input_path.name
     else:
+        if args.pocket_center_file is not None:
+            raise ValueError(
+                "pocket_center_file should be None if inferencing from a precomputed cache"
+            )
         pdb_input_path = None
         h5_cache_file_name = args.input_path.name
         h5_cache_dir = args.input_path.parent
@@ -79,6 +85,7 @@ if __name__ == "__main__":
         output_dir=h5_cache_dir,
         output_file_name=h5_cache_file_name,
         sub_dir_name=h5_cache_sub_dir_name,
+        pocket_center_file=args.pocket_center_file,
     ) as dp:
         if dp.need_preparation():
             dp.prepare()
@@ -86,7 +93,16 @@ if __name__ == "__main__":
             pass
         assert dp.cache_file.exists()
 
-        dataset = PocketwiseDatasetForInference(dp.cache_file, seq_based=seq_based)
+        if args.pocket_center_file is not None:
+            pocket_centers_dict = read_pocket_center_file(args.pocket_center_file)
+        else:
+            pocket_centerse_dict = dp.pocket_centers_dict
+        manual_pocket_names = {
+            prot_name: list(d.keys()) for prot_name, d in pocket_centers_dict.items()
+        }
+        dataset = PocketwiseDatasetForInference(
+            dp.cache_file, manual_pocket_names=manual_pocket_names, seq_based=seq_based
+        )
         dataloader = DataLoader(
             dataset,
             collate_fn=dataset.collate_fn,
@@ -95,17 +111,17 @@ if __name__ == "__main__":
             drop_last=False,
             num_workers=0,
         )
-        code_to_pocket_num_to_score = {}
-        code_to_pocket_num_to_center = {}
-        code_to_pocket_num_to_ca_idx_to_score = {}
+        code_to_pocket_name_to_score = {}
+        code_to_pocket_name_to_center = {}
+        code_to_pocket_name_to_ca_idx_to_score = {}
         print("Predicting..")
-        code_to_pocket_num_to_ca_idx_to_residue_name = {}
+        code_to_pocket_name_to_ca_idx_to_residue_name = {}
         for batch in tqdm(dataloader):
             # TODO: Output resnames as well
             if seq_based:
                 (
                     code_list,
-                    pocket_num_list,
+                    pocket_name_list,
                     pocket_center_list,
                     x,
                     R,
@@ -117,7 +133,7 @@ if __name__ == "__main__":
             else:
                 (
                     code_list,
-                    pocket_num_list,
+                    pocket_name_list,
                     pocket_center_list,
                     lens,
                     cat_grids,
@@ -126,23 +142,23 @@ if __name__ == "__main__":
                     ca_idxs_list,
                     residue_names_list,
                 ) = batch
-                for code, pocket_num, pocket_center, ca_idxs, residue_names in zip(
+                for code, pocket_name, pocket_center, ca_idxs, residue_names in zip(
                     code_list,
-                    pocket_num_list,
+                    pocket_name_list,
                     pocket_center_list,
                     ca_idxs_list,
                     residue_names_list,
                     strict=True,
                 ):
-                    code_to_pocket_num_to_center.setdefault(code, {})[pocket_num] = (
+                    code_to_pocket_name_to_center.setdefault(code, {})[pocket_name] = (
                         pocket_center
                     )
                     for ca_idx, residue_name in zip(
                         ca_idxs, residue_names, strict=True
                     ):
-                        code_to_pocket_num_to_ca_idx_to_residue_name.setdefault(
+                        code_to_pocket_name_to_ca_idx_to_residue_name.setdefault(
                             code, {}
-                        ).setdefault(pocket_num, {})[ca_idx] = residue_name
+                        ).setdefault(pocket_name, {})[ca_idx] = residue_name
 
                 cat_grids = cat_grids.to(args.device)
                 R = R.to(args.device)
@@ -164,43 +180,43 @@ if __name__ == "__main__":
                 bsd_out = np.mean(bsd_outs, axis=0)
                 bri_out_list = [np.mean(x, axis=0) for x in zip(*bri_out_lists)]
 
-            assert bsd_out.shape == (len(pocket_num_list),)
+            assert bsd_out.shape == (len(pocket_name_list),)
             for bri_out, ca_idxs in zip(bri_out_list, ca_idxs_list, strict=True):
                 assert bri_out.shape == (len(ca_idxs),)
 
-            for code, pocket_num, score in zip(
-                code_list, pocket_num_list, bsd_out, strict=True
+            for code, pocket_name, score in zip(
+                code_list, pocket_name_list, bsd_out, strict=True
             ):
-                code_to_pocket_num_to_score.setdefault(code, {})[pocket_num] = sigmoid(
-                    score
+                code_to_pocket_name_to_score.setdefault(code, {})[pocket_name] = (
+                    sigmoid(score)
                 )
-            for code, pocket_num, bri_out, ca_idxs in zip(
-                code_list, pocket_num_list, bri_out_list, ca_idxs_list, strict=True
+            for code, pocket_name, bri_out, ca_idxs in zip(
+                code_list, pocket_name_list, bri_out_list, ca_idxs_list, strict=True
             ):
                 for ca_idx, score in zip(ca_idxs, bri_out, strict=True):
-                    code_to_pocket_num_to_ca_idx_to_score.setdefault(
+                    code_to_pocket_name_to_ca_idx_to_score.setdefault(
                         code, {}
-                    ).setdefault(pocket_num, {})[ca_idx] = sigmoid(score)
+                    ).setdefault(pocket_name, {})[ca_idx] = sigmoid(score)
 
     # write csv
     def _get_csv_lines():
         csv_lines = []
-        for code, pocket_num_to_score in code_to_pocket_num_to_score.items():
-            sorted_pocket_nums = sorted(
-                pocket_num_to_score.keys(), key=lambda x: -pocket_num_to_score[x]
+        for code, pocket_name_to_score in code_to_pocket_name_to_score.items():
+            sorted_pocket_names = sorted(
+                pocket_name_to_score.keys(), key=lambda x: -pocket_name_to_score[x]
             )
-            selected_pocket_nums = sorted_pocket_nums[: args.top_n]
+            selected_pocket_names = sorted_pocket_names[: args.top_n]
 
-            for pocket_rank, pocket_num in enumerate(selected_pocket_nums, start=1):
-                pocket_center = code_to_pocket_num_to_center[code][pocket_num]
-                pocket_score = pocket_num_to_score[pocket_num]
+            for pocket_rank, pocket_name in enumerate(selected_pocket_names, start=1):
+                pocket_center = code_to_pocket_name_to_center[code][pocket_name]
+                pocket_score = pocket_name_to_score[pocket_name]
 
-                ca_idx_to_score = code_to_pocket_num_to_ca_idx_to_score[code][
-                    pocket_num
+                ca_idx_to_score = code_to_pocket_name_to_ca_idx_to_score[code][
+                    pocket_name
                 ]
-                ca_idx_to_residue_name = code_to_pocket_num_to_ca_idx_to_residue_name[
+                ca_idx_to_residue_name = code_to_pocket_name_to_ca_idx_to_residue_name[
                     code
-                ][pocket_num]
+                ][pocket_name]
                 residue_name_to_ca_idx = {
                     v: k for k, v in ca_idx_to_residue_name.items()
                 }
@@ -233,7 +249,7 @@ if __name__ == "__main__":
                     residue_rank = score_sorted_residue_names.index(residue_name) + 1
                     csv_line = [
                         code,
-                        pocket_num,
+                        pocket_name,
                         round(pocket_center[0], 2),
                         round(pocket_center[1], 2),
                         round(pocket_center[2], 2),
@@ -252,7 +268,7 @@ if __name__ == "__main__":
         csv_lines,
         columns=[
             "code",
-            "pocket_num",
+            "pocket_name",
             "pocket_center_x",
             "pocket_center_y",
             "pocket_center_z",
@@ -267,5 +283,5 @@ if __name__ == "__main__":
     df.to_csv(args.output_path, index=False)
 
     """ 
-    code, pocket_num, pocket_score, pocket_rank_within_code, residue_name, residue_score, residue_rank_within_pocket 
+    code, pocket_name, pocket_score, pocket_rank_within_code, residue_name, residue_score, residue_rank_within_pocket 
     """
