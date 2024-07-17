@@ -19,7 +19,7 @@ from utils.frames import to_frame
 class DataPreparation:
     def __init__(
         self,
-        input_dir: Path,
+        input_dir: Path | None,
         output_dir: Path | None = None,
         output_file_name: str | None = None,
         sub_dir_name: str | None = None,
@@ -27,18 +27,21 @@ class DataPreparation:
         voxelSize=1.0,
         CA_within=17.0,
     ):
-        pdb_files = list(input_dir.glob("*.pdb"))
-        assert len(pdb_files) > 0, f"No pdb files found in {input_dir}"
-        self.pdb_files = pdb_files
+        if input_dir is None:
+            self.pdb_files = None
+        else:
+            pdb_files = list(input_dir.glob("*.pdb"))
+            assert len(pdb_files) > 0, f"No pdb files found in {input_dir}"
+            self.pdb_files = pdb_files
         self.provided_output_dir = output_dir
         self.provided_output_file_name = output_file_name
         self.sub_dir_name = sub_dir_name
 
+        self.cache_file: Path | None = None
+
         self.gridSize = gridSize
         self.voxelSize = voxelSize
         self.CA_within = CA_within
-
-        self.cache_file: Path | None = None
 
     def __enter__(self):
         if self.provided_output_dir is None:
@@ -62,6 +65,9 @@ class DataPreparation:
             else self.output_dir / self.sub_dir_name
         )
         self.sub_dir.mkdir(exist_ok=True, parents=True)
+
+        if self.pdb_files is None:
+            assert not self.need_preparation()
 
         return self
 
