@@ -242,7 +242,7 @@ def get_CA_info_list(pdb_parser: PDBParser, protein_file):
             )
             heavy_coords_list.append(heavy_coords)
 
-            residue_name = f"{residue.resname}_{residue.id[1]}"
+            residue_name = f"{residue.parent.id}/{residue.resname}_{residue.id[1]}"
             residue_names.append(residue_name)
 
     return list(zip(t_list, R_list, heavy_coords_list, residue_names))
