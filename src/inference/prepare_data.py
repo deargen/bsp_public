@@ -28,6 +28,7 @@ class DataPreparation:
         voxelSize=1.0,
         CA_within=17.0,
         pocket_center_file: Path | None = None,
+        save_dtype=np.float32,
     ):
         if input_dir is None:
             self.pdb_files = None
@@ -50,6 +51,9 @@ class DataPreparation:
         self.gridSize = gridSize
         self.voxelSize = voxelSize
         self.CA_within = CA_within
+
+        assert save_dtype in [np.float16, np.float32]
+        self.save_dtype = save_dtype
 
     def __enter__(self):
         if self.provided_output_dir is None:
@@ -134,8 +138,8 @@ class DataPreparation:
                     atom_coords = atom_coords.astype(np.float32)
                     atom_features = atom_features.astype(np.float32)
 
-                    prot_gp["atom_coords"] = atom_coords.astype(np.float16)
-                    prot_gp["atom_features"] = atom_features.astype(np.float16)
+                    prot_gp["atom_coords"] = atom_coords.astype(self.save_dtype)
+                    prot_gp["atom_features"] = atom_features.astype(self.save_dtype)
 
                     prot_gp.attrs["num_pockets"] = len(pocket_centers)
                     prot_gp.attrs["manual_pocket_centers"] = manual_pocket_centers
