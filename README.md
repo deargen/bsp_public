@@ -1,5 +1,13 @@
 # bsp_public
 
+Inference docker for:
+
+Boosting Convolutional Neural Networks' Protein Binding Site Prediction Capacity Using SE(3)-invariant transformers, Transfer Learning and Homology-based Augmentation
+
+Daeseok Lee, Jeunghyun Byun, Bonggun Shin
+
+[arXiv](https://arxiv.org/abs/2303.08818)
+
 ## Setup
 ```
 docker pull daeseoklee/bsp-inference
